@@ -9,6 +9,11 @@ export interface TrackedMember {
   memberId: string;
 }
 
+export interface UsernameBaseline {
+  timestamp: number;
+  submissionIds: string[];
+}
+
 export class FirestoreRepository {
   async listTrackedMembers(): Promise<TrackedMember[]> {
     const members = await db.collectionGroup("members").get();
@@ -36,15 +41,21 @@ export class FirestoreRepository {
       : [];
   }
 
-  async getUsernameBaseline(usernameNormalized: string): Promise<number | null> {
+  async getUsernameBaseline(usernameNormalized: string): Promise<UsernameBaseline | null> {
     const snapshot = await db.collection("leetcodePollingState").doc(usernameNormalized).get();
-    const value = snapshot.get("latestAcceptedTimestamp");
-    return typeof value === "number" && Number.isFinite(value) ? value : null;
+    const timestamp = snapshot.get("latestAcceptedTimestamp");
+    if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return null;
+    const ids = snapshot.get("latestAcceptedSubmissionIds");
+    return {
+      timestamp,
+      submissionIds: Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : []
+    };
   }
 
-  async setUsernameBaseline(usernameNormalized: string, timestamp: number): Promise<void> {
+  async setUsernameBaseline(usernameNormalized: string, timestamp: number, submissionIds: string[]): Promise<void> {
     await db.collection("leetcodePollingState").doc(usernameNormalized).set({
       latestAcceptedTimestamp: timestamp,
+      latestAcceptedSubmissionIds: submissionIds,
       updatedAt: FieldValue.serverTimestamp()
     }, { merge: true });
   }
