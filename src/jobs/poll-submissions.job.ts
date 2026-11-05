@@ -42,12 +42,16 @@ export class PollSubmissionsJob {
         const baseline = await this.repository.getUsernameBaseline(usernameNormalized);
         if (baseline === null) {
           const latestTimestamp = accepted.reduce((latest, item) => Math.max(latest, item.timestamp), 0);
-          await this.repository.setUsernameBaseline(usernameNormalized, latestTimestamp);
+          const latestIds = accepted.filter((item) => item.timestamp === latestTimestamp).map((item) => item.id);
+          await this.repository.setUsernameBaseline(usernameNormalized, latestTimestamp, latestIds);
           console.log(`[poll] Established initial baseline for ${username}; no historical notifications sent.`);
           continue;
         }
 
-        const newSubmissions = accepted.filter((submission) => submission.timestamp > baseline);
+        const newSubmissions = accepted.filter((submission) =>
+          submission.timestamp > baseline.timestamp ||
+          (submission.timestamp === baseline.timestamp && !baseline.submissionIds.includes(submission.id))
+        );
         for (const submission of newSubmissions) {
           for (const owner of owners) {
             const claimed = await this.repository.claimSubmission(owner.ownerUid, submission.id);
@@ -70,9 +74,16 @@ export class PollSubmissionsJob {
         }
 
         if (accepted.length > 0) {
-          const latestTimestamp = accepted.reduce((latest, item) => Math.max(latest, item.timestamp), baseline);
-          if (latestTimestamp > baseline) {
-            await this.repository.setUsernameBaseline(usernameNormalized, latestTimestamp);
+          const latestTimestamp = accepted.reduce((latest, item) => Math.max(latest, item.timestamp), baseline.timestamp);
+          if (latestTimestamp > baseline.timestamp) {
+            const latestIds = accepted.filter((item) => item.timestamp === latestTimestamp).map((item) => item.id);
+            await this.repository.setUsernameBaseline(usernameNormalized, latestTimestamp, latestIds);
+          } else if (latestTimestamp === baseline.timestamp) {
+            const latestIds = accepted
+              .filter((item) => item.timestamp === latestTimestamp)
+              .map((item) => item.id);
+            const mergedIds = [...new Set([...baseline.submissionIds, ...latestIds])];
+            await this.repository.setUsernameBaseline(usernameNormalized, latestTimestamp, mergedIds);
           }
         }
       } catch (error) {
