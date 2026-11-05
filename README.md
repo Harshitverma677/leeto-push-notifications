@@ -42,9 +42,29 @@ curl -X POST http://localhost:3000/internal/run-poll \
   -H "Authorization: Bearer $POLL_SECRET"
 ```
 
-## Deployment
+## Deployment with Render Cron Jobs
 
-Deploy as a Node.js web service. Build command: `npm install && npm run build`. Start command: `npm start`. Configure a scheduler to POST to `/internal/run-poll` with the bearer secret at the chosen interval. Do not run overlapping poll jobs.
+This repository includes a one-shot runner for scheduled execution. Create a Render Cron Job connected to this repository and the `main` branch:
+
+- Runtime: Node
+- Build command: `npm install && npm run build`
+- Command: `npm run poll`
+- Schedule: `*/5 * * * *` (every five minutes, UTC)
+- Instance: Starter (0.5 CPU / 512 MB is sufficient for this workload)
+
+Configure these environment variables in Render:
+
+- `FIREBASE_PROJECT_ID=leetrack-5284d`
+- `FIREBASE_SERVICE_ACCOUNT_JSON` = the complete service-account JSON as a single-line secret value (recommended for hosted deployment)
+- `POLL_SECRET` = a new random secret, at least 24 characters (retained for local HTTP testing)
+- `POLL_INTERVAL_MINUTES=5`
+- `POLL_MAX_CONCURRENCY=3`
+- `MAX_SUBMISSION_LOOKBACK=20`
+- `NODE_ENV=production`
+
+Do not set `FIREBASE_SERVICE_ACCOUNT_PATH` on Render unless you deliberately include and securely provision that file. Never commit a service-account JSON file.
+
+Render cron runs are single-instance and must exit when complete. This runner exits after one polling cycle and returns a failing process status if any username poll fails. Render cron schedules use UTC. Render cron jobs have a minimum $1/month charge and compute is billed while the job runs; check current pricing before enabling frequent schedules. Start with every five minutes and monitor the run duration and LeetCode rate limits.
 
 ## Verify before production
 
