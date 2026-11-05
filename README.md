@@ -1,15 +1,16 @@
 # LEETO Push Notifications Backend
 
-TypeScript service that polls recent **Accepted** LeetCode submissions and sends FCM push notifications to LEETO account owners who track the submitting username.
+TypeScript service that polls recent Accepted LeetCode submissions and sends FCM push notifications to every LEETO account owner who tracks the submitting username.
 
-## Current behavior
+## Behavior
 
-- Only Accepted submissions are eligible.
-- Other statuses are ignored.
-- Firestore records a per-owner submission claim to avoid duplicate notifications.
-- FCM device tokens are read from `users/{uid}.fcmTokens`.
-- Tracked members are read from the `members` collection group.
-- Firebase Admin credentials are supplied only through environment variables.
+- Only Accepted submissions are eligible. The current LeetCode provider uses LeetCode's recent accepted-submission query, and the worker also checks the status before sending.
+- Each LeetCode username is polled once per cycle, with notifications fanned out to every distinct owner tracking it.
+- First run establishes a timestamp baseline and intentionally sends no historical notifications.
+- Per-owner submission claims prevent duplicate notifications on later polls.
+- FCM tokens are read from `users/{uid}.fcmTokens`.
+- Tracked profiles are read from the Firestore `members` collection group.
+- The poll endpoint requires a bearer secret.
 
 ## Requirements
 
@@ -24,30 +25,37 @@ npm install
 cp .env.example .env
 ```
 
-Set `FIREBASE_SERVICE_ACCOUNT_JSON` in `.env` to the complete service-account JSON as a single line. Never commit `.env` or the service-account key.
+Set `FIREBASE_SERVICE_ACCOUNT_JSON` to the complete service-account JSON on one line. Generate `POLL_SECRET` with `openssl rand -hex 32`. Never commit `.env` or the service-account key.
 
 ```bash
 npm run check
+npm test
 npm run dev
 ```
 
 Health check: `GET /health`
 
-Run one poll: `POST /internal/run-poll`
+Run one poll:
 
-## Important setup notes
+```bash
+curl -X POST http://localhost:3000/internal/run-poll \
+  -H "Authorization: Bearer $POLL_SECRET"
+```
 
-1. The polling endpoint is currently intended for a trusted scheduler. Before public deployment, add a shared-secret or platform-level authentication check to `POST /internal/run-poll`.
-2. Configure a scheduler to call `POST /internal/run-poll` at the desired interval. Do not run several overlapping workers.
-3. Verify the exact LeetCode GraphQL response shape against a test account before enabling production notifications. LeetCode may change or restrict this unofficial endpoint.
-4. Create a Firestore collection-group index if Firestore requests one for `members`.
-5. The current member deduplication behavior polls each LeetCode username once per run. If multiple users track the same username, notification fan-out should be expanded to each owner before production use.
+## Deployment
 
-## Firestore fields expected
+Deploy as a Node.js web service. Build command: `npm install && npm run build`. Start command: `npm start`. Configure a scheduler to POST to `/internal/run-poll` with the bearer secret at the chosen interval. Do not run overlapping poll jobs.
+
+## Verify before production
+
+LeetCode's GraphQL endpoint is unofficial and may change or restrict automated requests. Validate the response shape and polling behavior using a test profile. The endpoint currently returns recent accepted submissions, not a general event stream; polling frequency and lookback must be chosen to avoid missing submissions during high activity.
+
+Firestore may request a collection-group index for `members`. Create it when prompted. Worker state is stored in `leetcodePollingState`, dedupe claims in `notificationDedupe`, and poll errors in `notificationWorkerErrors`.
+
+## Expected Firestore fields
 
 - `users/{uid}.fcmTokens: string[]`
 - `users/{uid}/members/{memberId}.leetCodeUsername: string`
-- Optional: `leetCodeUsernameNormalized`
-- Optional: `ownerUid`
+- Optional `leetCodeUsernameNormalized` and `ownerUid`
 
-The worker uses Firebase Admin SDK and bypasses client security rules. Restrict service-account permissions and keep credentials private.
+Firebase Admin access bypasses client rules. Keep the service-account key secret and restrict its IAM permissions.
