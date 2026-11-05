@@ -16,8 +16,12 @@ export interface UsernameBaseline {
 
 export class FirestoreRepository {
   async listTrackedMembers(): Promise<TrackedMember[]> {
-    const members = await db.collectionGroup("members").get();
-    return members.docs.flatMap((doc) => {
+    const [members, users] = await Promise.all([
+      db.collectionGroup("members").get(),
+      db.collection("users").get()
+    ]);
+
+    const teammateProfiles = members.docs.flatMap((doc) => {
       const data = doc.data();
       const ownerUid = typeof data.ownerUid === "string" ? data.ownerUid : doc.ref.parent.parent?.id;
       const username = typeof data.leetCodeUsername === "string" ? data.leetCodeUsername.trim() : "";
@@ -31,6 +35,24 @@ export class FirestoreRepository {
         memberId: doc.id
       }];
     });
+
+    const primaryProfiles = users.docs.flatMap((doc) => {
+      const data = doc.data();
+      const username = typeof data.primaryLeetCodeUsername === "string"
+        ? data.primaryLeetCodeUsername.trim()
+        : "";
+      if (!username || data.primaryProfileSetupComplete !== true) return [];
+      return [{
+        ownerUid: doc.id,
+        username,
+        usernameNormalized: typeof data.primaryLeetCodeUsernameNormalized === "string"
+          ? normalizeUsername(data.primaryLeetCodeUsernameNormalized)
+          : normalizeUsername(username),
+        memberId: "primary"
+      }];
+    });
+
+    return [...teammateProfiles, ...primaryProfiles];
   }
 
   async getDeviceTokens(ownerUid: string): Promise<string[]> {
