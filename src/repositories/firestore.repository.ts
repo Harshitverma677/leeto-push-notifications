@@ -1,6 +1,6 @@
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { db } from "../config/firebase.js";
-import { normalizeUsername, type LeetCodeSubmission } from "../domain/submission.js";
+import { normalizeUsername } from "../domain/submission.js";
 
 export interface TrackedMember {
   ownerUid: string;
@@ -21,7 +21,7 @@ export class FirestoreRepository {
         ownerUid,
         username,
         usernameNormalized: typeof data.leetCodeUsernameNormalized === "string"
-          ? data.leetCodeUsernameNormalized
+          ? normalizeUsername(data.leetCodeUsernameNormalized)
           : normalizeUsername(username),
         memberId: doc.id
       }];
@@ -32,8 +32,21 @@ export class FirestoreRepository {
     const snapshot = await db.collection("users").doc(ownerUid).get();
     const tokens = snapshot.get("fcmTokens");
     return Array.isArray(tokens)
-      ? tokens.filter((token): token is string => typeof token === "string" && token.length > 0)
+      ? [...new Set(tokens.filter((token): token is string => typeof token === "string" && token.length > 0))]
       : [];
+  }
+
+  async getUsernameBaseline(usernameNormalized: string): Promise<number | null> {
+    const snapshot = await db.collection("leetcodePollingState").doc(usernameNormalized).get();
+    const value = snapshot.get("latestAcceptedTimestamp");
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+
+  async setUsernameBaseline(usernameNormalized: string, timestamp: number): Promise<void> {
+    await db.collection("leetcodePollingState").doc(usernameNormalized).set({
+      latestAcceptedTimestamp: timestamp,
+      updatedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
   }
 
   async claimSubmission(ownerUid: string, submissionId: string): Promise<boolean> {
@@ -53,10 +66,10 @@ export class FirestoreRepository {
     }
   }
 
-  async markSubmissionSent(ownerUid: string, submissionId: string, tokenCount: number): Promise<void> {
+  async markSubmissionSent(ownerUid: string, submissionId: string, successCount: number): Promise<void> {
     await db.collection("notificationDedupe").doc(`${ownerUid}_${submissionId}`).set({
       status: "sent",
-      tokenCount,
+      successCount,
       sentAt: FieldValue.serverTimestamp()
     }, { merge: true });
   }
