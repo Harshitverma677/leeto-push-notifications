@@ -1,7 +1,7 @@
 import { env } from "../config/env.js";
 import { isAcceptedSubmission, normalizeUsername } from "../domain/submission.js";
 import { LeetCodeClient } from "../providers/leetcode.client.js";
-import { FirestoreRepository } from "../repositories/firestore.repository.js";
+import { FirestoreRepository, type TrackedMember } from "../repositories/firestore.repository.js";
 import { NotificationService } from "../services/notification.service.js";
 
 export class PollSubmissionsJob {
@@ -11,54 +11,80 @@ export class PollSubmissionsJob {
     private readonly notifications = new NotificationService()
   ) {}
 
-  async runOnce(): Promise<{ membersChecked: number; notificationsSent: number; errors: number }> {
+  async runOnce(): Promise<{ usernamesChecked: number; notificationsSent: number; errors: number }> {
     const members = await this.repository.listTrackedMembers();
-    const uniqueMembers = new Map<string, typeof members[number]>();
+    const ownersByUsername = new Map<string, TrackedMember[]>();
+
     for (const member of members) {
-      uniqueMembers.set(member.usernameNormalized || normalizeUsername(member.username), member);
+      const key = normalizeUsername(member.usernameNormalized || member.username);
+      const owners = ownersByUsername.get(key) ?? [];
+      if (!owners.some((owner) => owner.ownerUid === member.ownerUid)) owners.push(member);
+      ownersByUsername.set(key, owners);
     }
 
     let notificationsSent = 0;
     let errors = 0;
-    let membersChecked = 0;
+    let usernamesChecked = 0;
 
-    for (const member of uniqueMembers.values()) {
-      membersChecked += 1;
+    for (const [usernameNormalized, owners] of ownersByUsername) {
+      const username = owners[0].username;
+      usernamesChecked += 1;
+
       try {
         const submissions = await this.leetcode.getRecentAcceptedSubmissions(
-          member.username,
+          username,
           env.MAX_SUBMISSION_LOOKBACK
         );
+        const accepted = submissions
+          .filter(isAcceptedSubmission)
+          .sort((a, b) => a.timestamp - b.timestamp);
 
-        for (const submission of submissions) {
-          if (!isAcceptedSubmission(submission)) continue;
-          const claimed = await this.repository.claimSubmission(member.ownerUid, submission.id);
-          if (!claimed) continue;
+        const baseline = await this.repository.getUsernameBaseline(usernameNormalized);
+        if (baseline === null) {
+          const latestTimestamp = accepted.reduce((latest, item) => Math.max(latest, item.timestamp), 0);
+          await this.repository.setUsernameBaseline(usernameNormalized, latestTimestamp);
+          console.log(`[poll] Established initial baseline for ${username}; no historical notifications sent.`);
+          continue;
+        }
 
-          try {
-            const tokens = await this.repository.getDeviceTokens(member.ownerUid);
-            if (tokens.length === 0) {
-              await this.repository.markSubmissionSent(member.ownerUid, submission.id, 0);
-              continue;
+        const newSubmissions = accepted.filter((submission) => submission.timestamp > baseline);
+        for (const submission of newSubmissions) {
+          for (const owner of owners) {
+            const claimed = await this.repository.claimSubmission(owner.ownerUid, submission.id);
+            if (!claimed) continue;
+
+            try {
+              const tokens = await this.repository.getDeviceTokens(owner.ownerUid);
+              if (tokens.length === 0) {
+                await this.repository.markSubmissionSent(owner.ownerUid, submission.id, 0);
+                continue;
+              }
+              const successCount = await this.notifications.sendAcceptedSubmission(tokens, submission);
+              await this.repository.markSubmissionSent(owner.ownerUid, submission.id, successCount);
+              notificationsSent += successCount;
+            } catch (error) {
+              await this.repository.releaseSubmissionClaim(owner.ownerUid, submission.id);
+              throw error;
             }
-            const delivered = await this.notifications.sendAcceptedSubmission(tokens, submission);
-            await this.repository.markSubmissionSent(member.ownerUid, submission.id, delivered);
-            notificationsSent += delivered;
-          } catch (error) {
-            await this.repository.releaseSubmissionClaim(member.ownerUid, submission.id);
-            throw error;
+          }
+        }
+
+        if (accepted.length > 0) {
+          const latestTimestamp = accepted.reduce((latest, item) => Math.max(latest, item.timestamp), baseline);
+          if (latestTimestamp > baseline) {
+            await this.repository.setUsernameBaseline(usernameNormalized, latestTimestamp);
           }
         }
       } catch (error) {
         errors += 1;
         const message = error instanceof Error ? error.message : String(error);
-        console.error(`[poll] Failed for ${member.username}: ${message}`);
-        await this.repository.recordPollError(member.username, message).catch((logError) => {
+        console.error(`[poll] Failed for ${username}: ${message}`);
+        await this.repository.recordPollError(username, message).catch((logError) => {
           console.error("[poll] Could not persist worker error:", logError);
         });
       }
     }
 
-    return { membersChecked, notificationsSent, errors };
+    return { usernamesChecked, notificationsSent, errors };
   }
 }
