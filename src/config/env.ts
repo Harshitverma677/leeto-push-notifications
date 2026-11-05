@@ -6,6 +6,7 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   FIREBASE_PROJECT_ID: z.string().min(1),
   FIREBASE_SERVICE_ACCOUNT_JSON: z.string().min(1),
+  POLL_SECRET: z.string().min(24),
   POLL_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(60).default(2),
   POLL_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(10).default(3),
   MAX_SUBMISSION_LOOKBACK: z.coerce.number().int().min(1).max(100).default(20)
