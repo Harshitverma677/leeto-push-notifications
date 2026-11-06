@@ -1,5 +1,7 @@
 import { messaging } from "../config/firebase.js";
-import type { LeetCodeSubmission } from "../domain/submission.js";
+import { formatSubmissionNotification, type LeetCodeSubmission } from "../domain/submission.js";
+
+export { formatSubmissionNotification };
 
 export class NotificationService {
   async sendAcceptedSubmission(tokens: string[], submission: LeetCodeSubmission): Promise<number> {
@@ -9,17 +11,20 @@ export class NotificationService {
     const chunks: string[][] = [];
     for (let i = 0; i < tokens.length; i += 500) chunks.push(tokens.slice(i, i + 500));
 
+    const { title, body, displayName } = formatSubmissionNotification(submission);
+
     for (const chunk of chunks) {
       const result = await messaging.sendEachForMulticast({
         tokens: chunk,
         notification: {
-          title: "Accepted submission 🎉",
-          body: `${submission.username} solved ${submission.title}`
+          title,
+          body
         },
         data: {
           type: "accepted_submission",
           submissionId: submission.id,
           username: submission.username,
+          displayName,
           title: submission.title,
           titleSlug: submission.titleSlug,
           url: submission.url

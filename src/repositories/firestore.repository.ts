@@ -7,6 +7,7 @@ export interface TrackedMember {
   username: string;
   usernameNormalized: string;
   memberId: string;
+  displayName?: string;
 }
 
 export interface UsernameBaseline {
@@ -22,13 +23,19 @@ export class FirestoreRepository {
       const ownerUid = typeof data.ownerUid === "string" ? data.ownerUid : doc.ref.parent.parent?.id;
       const username = typeof data.leetCodeUsername === "string" ? data.leetCodeUsername.trim() : "";
       if (!ownerUid || !username) return [];
+
+      const rawDisplayName = typeof data.displayName === "string" ? data.displayName.trim() : "";
+      const rawRealName = typeof data.profile?.realName === "string" ? data.profile.realName.trim() : "";
+      const displayName = rawDisplayName || rawRealName || undefined;
+
       return [{
         ownerUid,
         username,
         usernameNormalized: typeof data.leetCodeUsernameNormalized === "string"
           ? normalizeUsername(data.leetCodeUsernameNormalized)
           : normalizeUsername(username),
-        memberId: doc.id
+        memberId: doc.id,
+        displayName
       }];
     });
   }

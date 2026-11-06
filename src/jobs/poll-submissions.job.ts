@@ -1,5 +1,5 @@
 import { env } from "../config/env.js";
-import { isAcceptedSubmission, normalizeUsername } from "../domain/submission.js";
+import { isAcceptedSubmission, normalizeUsername, type LeetCodeSubmission } from "../domain/submission.js";
 import { LeetCodeClient } from "../providers/leetcode.client.js";
 import { FirestoreRepository, type TrackedMember } from "../repositories/firestore.repository.js";
 import { NotificationService } from "../services/notification.service.js";
@@ -63,7 +63,11 @@ export class PollSubmissionsJob {
                 await this.repository.markSubmissionSent(owner.ownerUid, submission.id, 0);
                 continue;
               }
-              const successCount = await this.notifications.sendAcceptedSubmission(tokens, submission);
+              const submissionForOwner: LeetCodeSubmission = {
+                ...submission,
+                displayName: owner.displayName || submission.displayName
+              };
+              const successCount = await this.notifications.sendAcceptedSubmission(tokens, submissionForOwner);
               await this.repository.markSubmissionSent(owner.ownerUid, submission.id, successCount);
               notificationsSent += successCount;
             } catch (error) {
