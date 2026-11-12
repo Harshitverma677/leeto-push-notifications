@@ -1,81 +1,133 @@
-# LEETO Push Notifications Backend
+<div align="center">
 
-TypeScript service that polls recent Accepted LeetCode submissions and sends FCM push notifications to every LEETO account owner who tracks the submitting username.
+# 🔔 LEETO Push Notifications
 
-## Behavior
+### The backend that powers instant LeetCode alerts for the LEETO app
 
-- Only Accepted submissions are eligible. The current LeetCode provider uses LeetCode's recent accepted-submission query, and the worker also checks the status before sending.
-- Each LeetCode username is polled once per cycle, with notifications fanned out to every distinct owner tracking it.
-- First run establishes a timestamp baseline and intentionally sends no historical notifications.
-- Per-owner submission claims prevent duplicate notifications on later polls.
-- FCM tokens are read from `users/{uid}.fcmTokens`.
-- Tracked profiles are read from the Firestore `members` collection group.
-- The poll endpoint requires a bearer secret.
+Polls LeetCode for new Accepted submissions and sends push notifications to your team.
 
-## Requirements
+![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![Express](https://img.shields.io/badge/Express-000000?style=for-the-badge&logo=express&logoColor=white)
+![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)
+![Render](https://img.shields.io/badge/Render-46E3B7?style=for-the-badge&logo=render&logoColor=black)
 
-- Node.js 20+
-- Firebase project `leetrack-5284d`
-- Firebase Admin service-account JSON with Firestore and FCM permissions
+📱 **Mobile app:** [leettrack_app](https://github.com/Harshitverma677/leettrack_app)
 
-## Local setup
+</div>
+
+---
+
+## ✨ Features
+
+- 🔍 Polls each tracked LeetCode username **once per cycle**
+- ✅ Notifies only for **Accepted** submissions
+- 🚫 **Firestore-based deduplication** stops repeat alerts
+- 🔔 Sends push notifications via **Firebase Cloud Messaging**
+- 🔐 Protected polling endpoint with a **Bearer token**
+- ❤️ Built-in **health-check** endpoint
+
+---
+
+## 🧠 How It Works
+
+```
+cron-job.org ➜ POST /internal/run-poll ➜ Read usernames & FCM tokens (Firestore)
+      ➜ Fetch recent submissions (LeetCode GraphQL) ➜ Accepted? ➜ Dedup check ➜ FCM push 📱
+```
+
+---
+
+## 🛠️ Tech Stack
+
+| Area | Tech |
+| --- | --- |
+| ⚙️ Runtime | Node.js, TypeScript, Express |
+| 🗄️ Database | Cloud Firestore |
+| 🔔 Notifications | Firebase Cloud Messaging (FCM) |
+| 🌐 Data Source | LeetCode public GraphQL endpoint |
+| ☁️ Hosting | Render Web Service |
+| ⏰ Scheduler | cron-job.org |
+
+---
+
+## 🔌 API
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Check server status |
+| `POST` | `/internal/run-poll` | Run one polling cycle (Bearer token required) |
+
+Example:
 
 ```bash
+curl -X POST https://<your-render-url>/internal/run-poll \
+  -H "Authorization: Bearer <POLL_SECRET>"
+```
+
+---
+
+## 🔑 Environment Variables
+
+| Variable | Description |
+| --- | --- |
+| `FIREBASE_PROJECT_ID` | Your Firebase project ID |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | Service account JSON (or a local file path for development) |
+| `POLL_SECRET` | Secret token for the polling endpoint |
+| `POLL_MAX_CONCURRENCY` | Max parallel LeetCode requests |
+| `MAX_SUBMISSION_LOOKBACK` | How many recent submissions to check |
+| `NODE_ENV` | `development` or `production` |
+
+> 📄 Copy `.env.example` to `.env` and fill in the values.
+
+---
+
+## ⚡ Run Locally
+
+```bash
+git clone https://github.com/Harshitverma677/leeto-push-notifications.git
+cd leeto-push-notifications
 npm install
 cp .env.example .env
 ```
 
-Set `FIREBASE_SERVICE_ACCOUNT_JSON` to the complete service-account JSON on one line. Generate `POLL_SECRET` with `openssl rand -hex 32`. Never commit `.env` or the service-account key.
+Then run:
 
 ```bash
-npm run check
-npm test
-npm run dev
+npm run check   # type check
+npm test        # run tests
+npm run dev     # start dev server
 ```
 
-Health check: `GET /health`
+Health check: `GET http://localhost:3000/health`
 
-Run one poll:
+---
 
-```bash
-curl -X POST http://localhost:3000/internal/run-poll \
-  -H "Authorization: Bearer $POLL_SECRET"
-```
+## 🚀 Deploy on Render
 
-## Deployment with Render Cron Jobs
+| Setting | Value |
+| --- | --- |
+| Service type | Web Service |
+| Build command | `npm install --include=dev && npm run build` |
+| Start command | `npm start` |
+| Environment | Add all variables above in Render settings |
 
-This repository includes a one-shot runner for scheduled execution. Create a Render Cron Job connected to this repository and the `main` branch:
+⏰ Then create a job on **cron-job.org** to call `POST /internal/run-poll` on your chosen schedule, with the header `Authorization: Bearer <POLL_SECRET>`.
 
-- Runtime: Node
-- Build command: `npm install && npm run build`
-- Command: `npm run poll`
-- Schedule: `*/5 * * * *` (every five minutes, UTC)
-- Instance: Starter (0.5 CPU / 512 MB is sufficient for this workload)
+---
 
-Configure these environment variables in Render:
+## 🔒 Security
 
-- `FIREBASE_PROJECT_ID=leetrack-5284d`
-- `FIREBASE_SERVICE_ACCOUNT_JSON` = the complete service-account JSON as a single-line secret value (recommended for hosted deployment)
-- `POLL_SECRET` = a new random secret, at least 24 characters (retained for local HTTP testing)
-- `POLL_INTERVAL_MINUTES=5`
-- `POLL_MAX_CONCURRENCY=3`
-- `MAX_SUBMISSION_LOOKBACK=20`
-- `NODE_ENV=production`
+- 🚫 Never commit `.env` or service-account JSON files
+- 🔑 Keep `POLL_SECRET` private
+- 🛡️ Keep FCM credentials on the backend only
 
-Do not set `FIREBASE_SERVICE_ACCOUNT_PATH` on Render unless you deliberately include and securely provision that file. Never commit a service-account JSON file.
+---
 
-Render cron runs are single-instance and must exit when complete. This runner exits after one polling cycle and returns a failing process status if any username poll fails. Render cron schedules use UTC. Render cron jobs have a minimum $1/month charge and compute is billed while the job runs; check current pricing before enabling frequent schedules. Start with every five minutes and monitor the run duration and LeetCode rate limits.
+<div align="center">
 
-## Verify before production
+### 👨‍💻 Built by [Harshit Verma](https://github.com/Harshitverma677)
 
-LeetCode's GraphQL endpoint is unofficial and may change or restrict automated requests. Validate the response shape and polling behavior using a test profile. The endpoint currently returns recent accepted submissions, not a general event stream; polling frequency and lookback must be chosen to avoid missing submissions during high activity.
+⭐ Star this repo if you like it!
 
-Firestore may request a collection-group index for `members`. Create it when prompted. Worker state is stored in `leetcodePollingState`, dedupe claims in `notificationDedupe`, and poll errors in `notificationWorkerErrors`.
-
-## Expected Firestore fields
-
-- `users/{uid}.fcmTokens: string[]`
-- `users/{uid}/members/{memberId}.leetCodeUsername: string`
-- Optional `leetCodeUsernameNormalized` and `ownerUid`
-
-Firebase Admin access bypasses client rules. Keep the service-account key secret and restrict its IAM permissions.
+</div>
